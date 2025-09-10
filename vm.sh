@@ -2,98 +2,81 @@
 set -euo pipefail
 
 # =============================
-# Ubuntu 22.04 VM (Auto Setup)
+# Ubuntu Auto Setup (Azimeee)
 # =============================
 
 clear
 cat << "EOF"
 ==============================================================
- _______    _______     __    __    __    _______    _______
+  _______    _______     __    __    __    _______    _______
 |  ___  |  |_____  |   |  |  |   \/   |  |  _____|  |  _____|
 | |___| |       /  /   |  |  |  \  /  |  | |____    | |____
 | |___| |     /  /     |  |  |  |\/|  |  |  ____|   |  ____|
 | |   | |   /  /____   |  |  |  |  |  |  | |_____   | |_____
 |_|   |_|  |________|  |__|  |__|  |__|  |_______|  |_______|
-                                                               
-              POWERED BY AZIMEE            
+                                   
+              POWERED BY AZIMEEE            
 ==============================================================
 EOF
 
 # =============================
-# Configurable Variables
+# Root Check
 # =============================
-VM_DIR="$HOME/vm"
-IMG_FILE="$VM_DIR/ubuntu-cloud.img"
-SEED_FILE="$VM_DIR/seed.iso"
-MEMORY=32768   # 32GB RAM
-CPUS=8
-SSH_PORT=24
-DISK_SIZE=100G
-
-mkdir -p "$VM_DIR"
-cd "$VM_DIR"
-
-# =============================
-# Ensure Dependencies
-# =============================
-if ! command -v qemu-system-x86_64 &>/dev/null || ! command -v cloud-localds &>/dev/null; then
-    echo "[INFO] Installing dependencies..."
-    if command -v sudo &>/dev/null; then
-        sudo apt update && sudo apt install -y qemu-system qemu-utils cloud-image-utils wget
-    else
-        apt update && apt install -y qemu-system qemu-utils cloud-image-utils wget
-    fi
+if [ "$(id -u)" -ne 0 ]; then
+    echo "[ERROR] Please run this script as root (sudo su)."
+    exit 1
 fi
 
 # =============================
-# VM Image Setup
+# Essentials Installation
 # =============================
-if [ ! -f "$IMG_FILE" ]; then
-    echo "[INFO] VM image not found, creating new VM..."
-    wget -q https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img -O "$IMG_FILE"
-    qemu-img resize "$IMG_FILE" "$DISK_SIZE"
+echo "[INFO] Updating system..."
+apt update -y && apt upgrade -y
 
-    # Cloud-init config with hostname = ubuntu22
-    cat > user-data <<'EOF'
-#cloud-config
-hostname: ubuntu22
-manage_etc_hosts: true
-disable_root: false
-ssh_pwauth: true
-chpasswd:
-  list: |
-    root:root
-  expire: false
-runcmd:
- - growpart /dev/vda 1 || true
- - resize2fs /dev/vda1 || true
- - sed -ri 's/^#?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
- - systemctl restart ssh
-EOF
+echo "[INFO] Installing essentials..."
+apt install -y \
+    curl wget git vim htop unzip zip \
+    software-properties-common apt-transport-https ca-certificates gnupg lsb-release
 
-    cat > meta-data <<EOF
-instance-id: iid-local01
-local-hostname: ubuntu22
-EOF
+# =============================
+# Docker Installation
+# =============================
+echo "[INFO] Installing Docker..."
 
-    cloud-localds "$SEED_FILE" user-data meta-data
-    echo "[INFO] VM setup complete!"
+if ! command -v docker &> /dev/null; then
+    curl -fsSL https://get.docker.com | sh
 else
-    echo "[INFO] VM image found, skipping setup..."
+    echo "[INFO] Docker already installed."
+fi
+
+systemctl enable docker
+systemctl start docker
+
+# =============================
+# Docker Compose Installation
+# =============================
+echo "[INFO] Installing Docker Compose..."
+
+if ! command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep tag_name | cut -d '"' -f 4)
+    curl -L "https://github.com/docker/compose/releases/download/${DOCKER_COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" \
+        -o /usr/local/bin/docker-compose
+    chmod +x /usr/local/bin/docker-compose
+else
+    echo "[INFO] Docker Compose already installed."
 fi
 
 # =============================
-# Start VM
+# Custom Prompt (root@azimeee)
 # =============================
-echo "[INFO] Starting VM..."
-exec qemu-system-x86_64 \
-    -enable-kvm \
-    -m "$MEMORY" \
-    -smp "$CPUS" \
-    -cpu host \
-    -drive file="$IMG_FILE",format=qcow2,if=virtio \
-    -drive file="$SEED_FILE",format=raw,if=virtio \
-    -boot order=c \
-    -device virtio-net-pci,netdev=n0 \
-    -netdev user,id=n0,hostfwd=tcp::${SSH_PORT}-:22 \
-    -nographic -serial mon:stdio
+echo "[INFO] Setting custom shell prompt..."
+echo 'export PS1="root@azimeee:\w# "' >> /root/.bashrc
+
+# =============================
+# Pull & Run Ubuntu Container
+# =============================
+echo "[INFO] Pulling Ubuntu image..."
+docker pull ubuntu:22.04
+
+echo "[INFO] Launching Ubuntu shell..."
+exec docker run -it --rm --hostname azimeee ubuntu:22.04 /bin/bash
