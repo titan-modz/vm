@@ -34,6 +34,18 @@ mkdir -p "$VM_DIR"
 cd "$VM_DIR"
 
 # =============================
+# Ensure Dependencies
+# =============================
+if ! command -v qemu-system-x86_64 &>/dev/null || ! command -v cloud-localds &>/dev/null; then
+    echo "[INFO] Installing dependencies..."
+    if command -v sudo &>/dev/null; then
+        sudo apt update && sudo apt install -y qemu-system qemu-utils cloud-image-utils wget
+    else
+        apt update && apt install -y qemu-system qemu-utils cloud-image-utils wget
+    fi
+fi
+
+# =============================
 # VM Image Setup
 # =============================
 if [ ! -f "$IMG_FILE" ]; then
@@ -42,7 +54,7 @@ if [ ! -f "$IMG_FILE" ]; then
     qemu-img resize "$IMG_FILE" "$DISK_SIZE"
 
     # Cloud-init config with hostname = ubuntu22
-    cat > user-data <<EOF
+    cat > user-data <<'EOF'
 #cloud-config
 hostname: ubuntu22
 manage_etc_hosts: true
@@ -52,15 +64,10 @@ chpasswd:
   list: |
     root:root
   expire: false
-growpart:
-  mode: auto
-  devices: ["/"]
-  ignore_growroot_disabled: false
-resize_rootfs: true
 runcmd:
  - growpart /dev/vda 1 || true
  - resize2fs /dev/vda1 || true
- - sed -ri "s/^#?PermitRootLogin.*/PermitRootLogin yes/" /etc/ssh/sshd_config
+ - sed -ri 's/^#?PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config
  - systemctl restart ssh
 EOF
 
@@ -88,5 +95,5 @@ exec qemu-system-x86_64 \
     -drive file="$SEED_FILE",format=raw,if=virtio \
     -boot order=c \
     -device virtio-net-pci,netdev=n0 \
-    -netdev user,id=n0,hostfwd=tcp::"$SSH_PORT"-:22 \
+    -netdev user,id=n0,hostfwd=tcp::${SSH_PORT}-:22 \
     -nographic -serial mon:stdio
