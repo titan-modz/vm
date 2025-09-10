@@ -67,10 +67,10 @@ else
 fi
 
 # =============================
-# Custom Prompt (root@azimeee)
+# Create Non-root User (gg)
 # =============================
-echo "[INFO] Setting custom shell prompt..."
-echo 'export PS1="root@azimeee:\w# "' >> /root/.bashrc
+echo "[INFO] Creating user 'gg'..."
+id -u gg &>/dev/null || useradd -m -s /bin/bash gg
 
 # =============================
 # Pull & Run Ubuntu Container
@@ -78,5 +78,10 @@ echo 'export PS1="root@azimeee:\w# "' >> /root/.bashrc
 echo "[INFO] Pulling Ubuntu image..."
 docker pull ubuntu:22.04
 
-echo "[INFO] Launching Ubuntu shell..."
-exec docker run -it --rm --hostname azimeee ubuntu:22.04 /bin/bash
+echo "[INFO] Launching Ubuntu shell as gg@azimee..."
+exec docker run -it --rm --hostname azimee ubuntu:22.04 /bin/bash -c "
+    apt update -y >/dev/null 2>&1 && apt install -y sudo >/dev/null 2>&1
+    useradd -m -s /bin/bash gg
+    echo 'gg ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+    su - gg
+"
